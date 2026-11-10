@@ -276,20 +276,44 @@ export function newId() {
 
 export const DATA_VERSION = 2;
 
+const DEFAULT_METHODS = ['Credit Card', 'Debit Card', 'Cash', 'Bank Transfer', 'Other'];
+const list = (v) => (Array.isArray(v) ? v : []);
+
+// Twelve { month, cost } rows. Backups from the other version of the app keep badminton
+// as a "Badminton" tracker with a months array instead, so take the numbers from there.
+function badmintonMonths(r) {
+  const tracker = list(r.trackers).find((t) => /badminton/i.test((t && t.name) || '') && Array.isArray(t.months));
+  const have = list(r.badminton);
+  return Array.from({ length: 12 }, (_, i) => {
+    if (have.length) return { ...(have[i] || {}), month: i + 1, cost: Number(have[i] && have[i].cost) || 0 };
+    return { month: i + 1, cost: tracker ? Number(tracker.months[i]) || 0 : 0 };
+  });
+}
+
+// Brings any saved or restored data up to what the screens expect. It fills in whatever is
+// missing regardless of the version number, because backups can come from other versions of
+// the app (for example "version 3" ones with trackers instead of badminton). Unknown extra
+// fields are kept as they are.
 export function migrate(data) {
-  const d = JSON.parse(JSON.stringify(data));
-  if ((d.version || 1) < 2) {
-    d.transactions = d.transactions.map((t) => {
-      return { ...t, store: t.store != null ? t.store : '' };
-    });
-    d.budgets = d.budgets.map((b) => ({ rollover: false, ...b }));
-    d.goals = d.goals || [];
-    const withDue = (x) => ({ dueDate: '', remind: false, ...x });
-    d.recurring.subscriptions = d.recurring.subscriptions.map(withDue);
-    d.recurring.bills = d.recurring.bills.map(withDue);
-    d.settings = { theme: 'system', budgetAlerts: true, billReminders: true, remindDaysBefore: 2, ...d.settings };
-    d.version = 2;
-  }
+  const d = JSON.parse(JSON.stringify(data || {}));
+  d.transactions = list(d.transactions);
+  d.budgets = list(d.budgets).map((b) => ({ rollover: false, type: 'Flexible', notes: '', ...b, monthly: Number(b.monthly) || 0 }));
+  d.methods = list(d.methods).length ? d.methods : [...DEFAULT_METHODS];
+  d.categories = list(d.categories).length ? d.categories : [...d.budgets.map((b) => b.category), INCOME];
+  d.goals = list(d.goals).map((g) => ({ name: '', targetDate: '', ...g, id: g.id || newId(), target: Number(g.target) || 0, saved: Number(g.saved) || 0 }));
+  d.settings = {
+    expectedIncome: 0, warnThreshold: 0.9, theme: 'system', budgetAlerts: true, billReminders: true, remindDaysBefore: 2,
+    ...(d.settings || {}),
+  };
+  const r = d.recurring && typeof d.recurring === 'object' ? d.recurring : {};
+  const withDue = (x) => ({ name: '', cost: 0, frequency: 'Monthly', dueDate: '', remind: false, ...x });
+  r.subscriptions = list(r.subscriptions).map(withDue);
+  r.bills = list(r.bills).map(withDue);
+  r.gifts = list(r.gifts);
+  r.trips = list(r.trips);
+  r.badminton = badmintonMonths(r);
+  d.recurring = r;
+  d.version = Math.max(Number(d.version) || 1, DATA_VERSION);
   for (const t of d.transactions) {
     // Ids double as cloud document names, so they must exist and contain no slashes.
     if (!t.id || String(t.id).includes('/')) t.id = newId();

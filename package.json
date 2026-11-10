@@ -35,7 +35,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export -p web && node scripts/finish-web.js && workbox generateSW workbox-config.js",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/new_features.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/sync.test.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/new_features.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/sync.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/backup-import.test.mjs",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit"
   },
