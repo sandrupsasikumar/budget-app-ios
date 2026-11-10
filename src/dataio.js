@@ -1,7 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
-import { isWeb, say } from './platform';
+import { isWeb, say, confirmAction } from './platform';
 import { transactionsToCsv, csvToTransactions, newId, migrate, todayString } from './logic';
 
 // Web: share sheet with a file where supported (iPhone: Save to Files, AirDrop, Mail),
@@ -76,11 +76,27 @@ export async function importFile(data, { update, replaceAll }) {
     if (res.canceled || !res.assets?.length) return;
     const asset = res.assets[0];
     const text = await readPicked(asset);
-    if ((asset.name || '').toLowerCase().endsWith('.json')) {
+    // iPhone can rename a file when it is saved or shared, so also look at what is inside.
+    if ((asset.name || '').toLowerCase().endsWith('.json') || text.trimStart().startsWith('{')) {
       const parsed = JSON.parse(text);
       if (!Array.isArray(parsed.transactions) || !Array.isArray(parsed.budgets)) throw new Error('Not a backup from this app');
-      replaceAll(migrate(parsed));
-      say('Backup restored', `${parsed.transactions.length} transactions loaded. Receipt photos are not included in backups.`);
+      const restore = () => {
+        try {
+          replaceAll(migrate(parsed));
+          say('Backup restored', `${parsed.transactions.length} transactions loaded. Receipt photos are not included in backups.`);
+        } catch (e) {
+          say('Import failed', String(e.message || e));
+        }
+      };
+      // Restoring replaces everything, so ask first when there is something to lose.
+      const have = data.transactions.length;
+      if (have > 0) {
+        confirmAction('Replace everything with this backup?',
+          `The backup has ${parsed.transactions.length} transactions. It replaces the ${have} in the app now, along with your budgets, goals and plans.`,
+          'Restore', restore);
+      } else {
+        restore();
+      }
     } else {
       const cats = [...data.budgets.map((b) => b.category), 'Income'];
       const { transactions, skipped } = csvToTransactions(text, cats);

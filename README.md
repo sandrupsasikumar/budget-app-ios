@@ -7,13 +7,14 @@ Personal budget tracker built from your Budgetting_Sheet.xlsx. Runs on your iPho
 Home
 - Month summary: what is left to spend, a safe amount per day, top category, biggest purchase, and how you are tracking against last month
 - Income, spent, net saved and savings rate
-- Left to spend by category, with a per day amount, status (On track, Near limit, Over budget), rollover carry and year to date
-- Coming up: next bills and subscriptions with a due date
-- Charts: six month income vs spending trend, and where the money went this month
+- Left to spend by category, with a per day amount, status (On track, Near limit, Over budget), rollover carry and year to date. Tap a category to see its transactions
+- Coming up: next bills and subscriptions with a due date ("Due in 5 days"), each with a Log button that opens Add expense filled in
+- Charts: six month income vs spending trend, and where the money went this month (tap a category to see its transactions)
 - Year: year at a glance table and category by month heatmap
 
 Add expense (big + button)
-- Amount, store, category, payment method, what you bought, date (native date picker), notes
+- Amount, store, category, payment method, what you bought, date (date picker), notes. Starts on the payment method you used last
+- Undo on the "Saved" banner takes the expense back out and puts it back in the form
 - Store suggestions from past purchases. Picking one fills in the category and payment method you used there last time
 - Quick add again: one tap to refill a recent purchase
 - Split with others: enter the full bill and the number of people, only your share is saved
@@ -21,17 +22,19 @@ Add expense (big + button)
 - Budget alert when a category reaches your warning % or goes over (in the app and as a phone notification)
 
 Activity
-- Grouped by day, search by store, description or notes, filter by category and payment method, tap to edit or delete
+- Grouped by day (Today, Yesterday, then the date) with a total for each day, filter by category and payment method, tap to edit or delete
+- Search by store, description, notes or amount. Searching looks through every month, not only the one on screen
 
 Plan
 - Savings goals with target, optional date, money added or taken out, and the monthly amount needed
 - Monthly set aside for subscriptions, annual bills, gifts and badminton
-- Subscriptions and bills with due dates and reminders
+- Subscriptions and bills, one line each: tap one to change its name, cost, budget category or due date, or to log a payment of it as an expense
 - Gifts and trips with your share after splitting
 
 Budget
 - Expected income, warning %, monthly budget per category, Fixed or Flexible, Rollover on or off
-- Account: sign in with email and password to sync to the cloud, or use the app on this device only
+- Add a category, or tap a category name to rename or delete it. Renaming updates its transactions; deleting keeps them and moves them to Uncategorised
+- Account: sign in with email and password to sync to the cloud, or use the app on this device only. The card says whether you are synced, offline, or the last sync failed (with a Try again button)
 - Settings: light, dark or match phone; budget alerts; bill reminders and how many days before
 - Export transactions to CSV for Google Sheets (same columns as your Transactions tab, with Store added at the end), full backup, import, erase all data
 
@@ -41,6 +44,8 @@ Budget
 - Signed in: every change also syncs to Firestore under `users/{your id}` (settings, budgets, plans and goals) and `users/{your id}/transactions` (one document per transaction). Changes made offline upload when you are back online. If Safari clears the app's storage, sign in again and everything comes back.
 - This device only: skip sign in and everything stays in the browser, like before. Safari can clear it, so keep backups. You can sign in later from Budget > Account.
 - Signing in on a device that already has data: a new (empty) account gets this device's data. Signing in to an account that already has data replaces what is on the device with the account's copy.
+- If a sync fails (no permission, the free daily allowance used up, a bad connection), the changes stay on the device and are sent again on your next edit, when the app is reopened or comes back online, or when you tap Try again in Budget > Account. Signing out warns you first if something has not reached the cloud.
+- Restoring a backup replaces everything, so the app asks first when it already has transactions.
 - Receipt photos stay on the device and are not synced or included in backups.
 - The sync rules are in `src/sync.js` (tested by `test/sync.test.mjs`); the Firebase calls are in `src/cloud.js`.
 
@@ -86,7 +91,7 @@ From another device: export a full backup there (Budget > Export full backup), t
 ## What is different from a native app
 
 - No bill reminder or budget notifications. Budget warnings show as a banner after you save an expense, and bills with a due date show under Coming up on Home.
-- Dates are typed as YYYY-MM-DD (the native date picker is only in the phone app build).
+- Dates use Safari's own date picker.
 
 ## Run it locally
 
@@ -100,7 +105,7 @@ Build the web version like GitHub does: `BASE_URL=/REPO-NAME npm run build:web`,
 
 ```bash
 npm start          # dev server
-npm test           # budget logic and sync tests
+npm test           # budget logic, sync, backup import and category tests
 npm run lint       # expo lint
 npm run typecheck  # tsc --noEmit
 npx expo-doctor    # dependency and config checks
@@ -108,7 +113,7 @@ npx expo-doctor    # dependency and config checks
 
 - Screens and navigation use Expo Router: routes are in `src/app/` (tabs in `src/app/(tabs)/`, the edit screen in `src/app/edit/[id].js`, sign in in `src/app/sign-in.js`). Screen components are in `src/screens/`, shared state in `src/state.js`.
 - `scripts/finish-web.js` runs after the web export: it points the links in index.html at the site folder and writes 404.html, so reloading any page on GitHub Pages still opens the app.
-- The calculations are in src/logic.js. test/verify.py checks them against every figure on your sheet and test/new_features.mjs checks the newer features. Both read test/fixtures/real-seed.json, which holds your spreadsheet data and is kept out of git.
+- The calculations are in src/logic.js. test/verify.py checks them against every figure on your sheet and test/new_features.mjs checks the newer features. Both read test/fixtures/real-seed.json, which holds your spreadsheet data and is kept out of git. test/improvements.test.mjs (search, day labels, categories, failed sync) uses made-up data only.
 
 ## Notes
 

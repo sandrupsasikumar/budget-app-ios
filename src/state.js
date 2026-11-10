@@ -4,9 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadData, saveData, freshData } from './storage';
 import { budgetAlert, migrate } from './logic';
 import { sendBudgetAlert, rescheduleBillReminders } from './notify';
-import { requestPersistentStorage } from './platform';
+import { requestPersistentStorage, isWeb } from './platform';
 import { cloudAvailable, watchAuth, watchUserData, writeChanges, signInEmail, createAccount, signOutCloud } from './cloud';
-import { splitData, joinData, diff, merge, firstSync, deepEqual } from './sync';
+import { splitData, joinData, diff, merge, firstSync, deepEqual, unsend } from './sync';
 
 // App wide data store. The phone copy (AsyncStorage) is always kept so the app opens
 // instantly and works offline. When signed in, changes also sync to Firestore.
@@ -26,6 +26,11 @@ export function DataProvider({ children }) {
   const [mode, setMode] = useState(null);
   const [modeLoaded, setModeLoaded] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // idle | syncing | error
+  const [syncError, setSyncError] = useState(null); // Firebase error code of the last failure
+  const [online, setOnline] = useState(() => !(isWeb && typeof navigator !== 'undefined' && navigator.onLine === false));
+  const [watchRound, setWatchRound] = useState(0); // bumped to listen to the cloud again after an error
+  const [activityCategory, setActivityCategory] = useState('All'); // filter on the Activity tab
+  const [draft, setDraft] = useState(null); // values for the Add screen to start from
   const [reminderCount, setReminderCount] = useState(0);
   const now = new Date();
   const [period, setPeriod] = useState({ year: now.getFullYear(), month: now.getMonth() + 1 });
@@ -36,6 +41,9 @@ export function DataProvider({ children }) {
   const userRef = useRef(null);
   const saveTimer = useRef(null);
   const syncTimer = useRef(null);
+  const pendingWrites = useRef(0);
+  const writeFailed = useRef(null); // error code while the last upload failed
+  const listenFailed = useRef(null); // error code while listening to the cloud has stopped
 
   // Updates the ref straight away so sync code never reads a stale copy.
   const setData = useCallback((next) => {
@@ -70,6 +78,12 @@ export function DataProvider({ children }) {
 
   // ---- Cloud sync ----
 
+  const showStatus = useCallback(() => {
+    const failed = writeFailed.current || listenFailed.current;
+    setSyncError(failed || null);
+    setSyncStatus(pendingWrites.current > 0 ? 'syncing' : failed ? 'error' : 'idle');
+  }, []);
+
   const flush = useCallback(() => {
     clearTimeout(syncTimer.current);
     const u = userRef.current;
@@ -78,13 +92,27 @@ export function DataProvider({ children }) {
     const local = splitData(dataRef.current);
     const changes = diff(b.base, local);
     if (changes.empty) return;
+    const before = b.base;
     baseRef.current = { uid: u.uid, base: local };
     persistNow();
-    setSyncStatus('syncing');
-    writeChanges(u.uid, changes)
-      .then(() => setSyncStatus('idle'))
-      .catch(() => setSyncStatus('error'));
-  }, [persistNow]);
+    pendingWrites.current += 1;
+    showStatus();
+    writeChanges(u.uid, changes).then(() => {
+      writeFailed.current = null;
+    }, (e) => {
+      writeFailed.current = (e && e.code) || 'unknown';
+      // The cloud refused these changes. Mark them as not sent, so they stay on this phone
+      // and the next sync tries again.
+      const cur = baseRef.current;
+      if (cur && cur.uid === u.uid) {
+        baseRef.current = { uid: u.uid, base: unsend(cur.base, before, changes) };
+        persistNow();
+      }
+    }).finally(() => {
+      pendingWrites.current -= 1;
+      showStatus();
+    });
+  }, [persistNow, showStatus]);
 
   // which: 'meta' or 'tx', the side that just changed in the cloud.
   const applyRemote = useCallback((which) => {
@@ -117,7 +145,9 @@ export function DataProvider({ children }) {
     }
     persistNow();
     clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(flush, 0);
+    // After a refused upload, wait for the next edit or the next time the app opens before
+    // trying again. Retrying on every cloud update would repeat the same failure in a loop.
+    if (!writeFailed.current) syncTimer.current = setTimeout(flush, 0);
   }, [flush, persistNow, setData]);
 
   useEffect(() => watchAuth((u) => { userRef.current = u; setUser(u); }), []);
@@ -136,12 +166,22 @@ export function DataProvider({ children }) {
         remoteRef.current = { ...r, tx: t, fromCache: { ...r.fromCache, tx: cached } };
         applyRemote('tx');
       },
-      onError: () => setSyncStatus('error'),
+      // Firestore stops listening after an error; retrySync starts it again.
+      onError: (e) => { listenFailed.current = (e && e.code) || 'unknown'; showStatus(); },
     });
     return stop;
     // Subscribe once per signed in account, after local data has loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, modeLoaded, data === null]);
+  }, [user?.uid, modeLoaded, data === null, watchRound]);
+
+  // Second chance for anything that failed: listen again and upload what is still waiting.
+  const retrySync = useCallback(() => {
+    if (listenFailed.current) {
+      listenFailed.current = null;
+      setWatchRound((n) => n + 1);
+    }
+    flush();
+  }, [flush]);
 
   // Save to the phone and queue an upload a moment after edits stop, rather than on every keystroke.
   useEffect(() => {
@@ -153,12 +193,23 @@ export function DataProvider({ children }) {
   }, [data, persistNow, flush]);
 
   // iOS may suspend the app soon after it leaves the screen, so write everything out then.
+  // Coming back to the app is a good moment to retry a sync that failed.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => {
-      if (s !== 'active') { persistNow(); flush(); }
+      if (s !== 'active') { persistNow(); flush(); } else retrySync();
     });
     return () => sub.remove();
-  }, [persistNow, flush]);
+  }, [persistNow, flush, retrySync]);
+
+  // Browser only: know when there is no connection, and sync as soon as it returns.
+  useEffect(() => {
+    if (!isWeb || typeof window === 'undefined') return undefined;
+    const up = () => { setOnline(true); retrySync(); };
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
+  }, [retrySync]);
 
   // ---- Bill reminders ----
 
@@ -211,15 +262,29 @@ export function DataProvider({ children }) {
     setMode(null);
   }, []);
 
+  // True when this device holds changes the cloud has not confirmed yet.
+  const hasUnsynced = useCallback(() => {
+    const u = userRef.current;
+    const b = baseRef.current;
+    if (!u || !dataRef.current) return false;
+    if (!b || b.uid !== u.uid) return dataRef.current.transactions.length > 0;
+    return pendingWrites.current > 0 || !diff(b.base, splitData(dataRef.current)).empty;
+  }, []);
+
   // Signing out clears this device's copy; the data stays in the cloud account.
   const signOut = useCallback(async () => {
     flush();
     await signOutCloud();
     baseRef.current = null;
+    writeFailed.current = null;
+    listenFailed.current = null;
     setData(freshData());
     persistNow();
-    setSyncStatus('idle');
-  }, [flush, persistNow, setData]);
+    showStatus();
+  }, [flush, persistNow, setData, showStatus]);
+
+  // Opens the Add screen with these values filled in (store, amount, category, ...).
+  const startDraft = useCallback((values) => setDraft({ ...values, n: Date.now() }), []);
 
   const authReady = !cloudAvailable || user !== undefined;
   const ready = !!data && modeLoaded && authReady;
@@ -228,8 +293,10 @@ export function DataProvider({ children }) {
   const value = useMemo(() => ({
     data, setData, update, saveTx, delTx, period, setPeriod, reminderCount,
     ready, needsSignIn,
-    account: { cloudAvailable, user: user || null, mode, syncStatus, signIn, signOut, chooseLocal, startSignIn },
-  }), [data, setData, update, saveTx, delTx, period, reminderCount, ready, needsSignIn, user, mode, syncStatus, signIn, signOut, chooseLocal, startSignIn]);
+    activityCategory, setActivityCategory, draft, startDraft,
+    account: { cloudAvailable, user: user || null, mode, syncStatus, syncError, online, hasUnsynced, retrySync, signIn, signOut, chooseLocal, startSignIn },
+  }), [data, setData, update, saveTx, delTx, period, reminderCount, ready, needsSignIn, activityCategory, draft, startDraft,
+    user, mode, syncStatus, syncError, online, hasUnsynced, retrySync, signIn, signOut, chooseLocal, startSignIn]);
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

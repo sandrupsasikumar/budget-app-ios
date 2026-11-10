@@ -71,3 +71,14 @@ export function firstSync(local, remote) {
   if (hasData(remote)) return { next: remote, base: remote };
   return { next: local, base: EMPTY };
 }
+
+// A write failed, so for everything in that write the cloud still holds what it held before
+// (prev). Put those entries back into base; the next sync then sees them as still to upload,
+// and a cloud update can no longer undo the edit on this phone.
+export function unsend(base, prev, changes) {
+  const tx = { ...base.tx };
+  for (const id of [...changes.upserts.map((t) => t.id), ...changes.deletes]) {
+    if (id in prev.tx) tx[id] = prev.tx[id]; else delete tx[id];
+  }
+  return { meta: changes.meta ? prev.meta : base.meta, tx };
+}

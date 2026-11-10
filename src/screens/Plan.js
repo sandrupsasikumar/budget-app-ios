@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { View, Pressable } from 'react-native';
-import { Card, H, Btn, Chip, Field, Screen, T, Row, Icon, Bar, useNumberText } from '../ui';
+import { Card, H, Btn, Chip, ChipRow, Field, Label, Screen, T, Row, Icon, Bar, useNumberText } from '../ui';
 import { useTheme } from '../theme';
-import { isWeb } from '../platform';
+import { isWeb, confirmAction } from '../platform';
 import DateField from '../DateField';
 import {
-  money, perYear, share, planSummary, MONTHS, goalStatus, nextDue, isValidDate, newId, todayString,
+  money, perYear, share, planSummary, MONTHS, goalStatus, nextDue, dueLabel, dayLabel, isValidDate, newId, todayString,
 } from '../logic';
 
 const Del = ({ onPress, label = 'Remove' }) => {
@@ -54,7 +54,7 @@ function GoalCard({ g, onChange, onDelete }) {
       </Row>
       {!st.done && st.perMonth != null && (
         <T size={12} color={st.overdue ? c.bad : c.muted}>
-          {st.overdue ? `Target date passed with ${money(st.remaining)} to go` : `Save ${money(st.perMonth)} a month to reach it by ${g.targetDate}`}
+          {st.overdue ? `Target date passed with ${money(st.remaining)} to go` : `Save ${money(st.perMonth)} a month to reach it by ${dayLabel(g.targetDate)}`}
         </T>
       )}
       {!st.done && st.perMonth == null && <T size={12} muted>{money(st.remaining)} to go. Add a target date to see a monthly amount.</T>}
@@ -112,42 +112,76 @@ function Goals({ goals, onChange }) {
 
 // ---------- Subscriptions and bills ----------
 
-function CostList({ title, items, onChange, remindersOn }) {
+// One line per item; tap it to open the editor underneath.
+// categories: budget category names. onLog(item): record a payment of it as an expense.
+function CostList({ title, items, onChange, remindersOn, categories, onLog }) {
   const c = useTheme();
+  const [open, setOpen] = useState(null);
   const set = (i, patch) => onChange(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const today = todayString();
+  const add = () => {
+    const id = newId();
+    onChange([...items, { id, name: '', cost: 0, frequency: 'Monthly', dueDate: '', remind: true, category: '' }]);
+    setOpen(id);
+  };
+  const remove = (x, i) => {
+    const go = () => onChange(items.filter((_, j) => j !== i));
+    if (x.name) confirmAction(`Remove ${x.name}?`, 'Expenses already logged for it are kept.', 'Remove', go); else go();
+  };
   return (
     <Card>
       <H right={<T weight="800">{money(items.reduce((a, x) => a + perYear(x), 0))} / yr</T>}
-        sub={isWeb ? 'Add a due date to see it under Coming up on Home' : remindersOn ? 'Add a due date to get a reminder before it is charged' : 'Bill reminders are off in Budget settings'}>{title}</H>
+        sub={isWeb ? 'Tap one to change it. Add a due date to see it under Coming up on Home.' : remindersOn ? 'Tap one to change it. Add a due date to get a reminder before it is charged.' : 'Tap one to change it. Bill reminders are off in Budget settings.'}>{title}</H>
+      {items.length === 0 && <T muted size={14} style={{ marginBottom: 4 }}>Nothing here yet.</T>}
       {items.map((x, i) => {
         const due = nextDue(x, today);
+        const isOpen = open === x.id;
+        const facts = [x.frequency, x.category || null, due ? `due ${dueLabel(due, today).replace(/^(Today|Tomorrow|Yesterday)$/, (w) => w.toLowerCase())}` : null].filter(Boolean).join('  ·  ');
         return (
-          <View key={x.id || i} style={{ paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line, gap: 6 }}>
-            <Row style={{ gap: 8 }}>
-              <Field style={{ flex: 1 }} value={x.name} placeholder="Name" onChangeText={(v) => set(i, { name: v })} />
-              <NumField value={x.cost} onChange={(n) => set(i, { cost: n })} />
-              <Del onPress={() => onChange(items.filter((_, j) => j !== i))} />
-            </Row>
-            <Row style={{ gap: 6 }}>
-              {['Monthly', 'Annually'].map((f) => <Chip key={f} label={f} active={x.frequency === f} onPress={() => set(i, { frequency: f })} />)}
-              <T size={12} muted style={{ marginLeft: 'auto' }}>{money(perYear(x) / 12)}/mth</T>
-            </Row>
-            <Row style={{ gap: 8 }}>
-              <DateField style={{ flex: 1 }} label="Due date" optional value={x.dueDate || ''}
-                onChange={(v) => set(i, { dueDate: v })} accessibilityLabel={`${x.name} due date`} />
-              {!isWeb && <Chip label="Remind" icon="notifications-outline" active={!!x.remind} onPress={() => set(i, { remind: !x.remind })} />}
-            </Row>
-            {x.dueDate ? (
-              <T size={12} color={isValidDate(x.dueDate) ? c.muted : c.bad}>
-                {isValidDate(x.dueDate) ? `Next due ${due}` : 'Date should look like 2026-11-05'}
-              </T>
-            ) : null}
+          <View key={x.id || i} style={{ borderTopWidth: 1, borderTopColor: c.line }}>
+            <Pressable onPress={() => setOpen(isOpen ? null : x.id)} accessibilityRole="button" accessibilityState={{ expanded: isOpen }}
+              accessibilityLabel={`${x.name || 'New item'}, ${money(x.cost)} ${x.frequency}`}
+              style={{ paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Icon name={isOpen ? 'chevron-down' : 'chevron-forward'} size={16} color={c.muted} />
+              <View style={{ flex: 1 }}>
+                <T weight="600" numberOfLines={1} color={x.name ? c.text : c.muted}>{x.name || 'New item'}</T>
+                <T size={12} muted numberOfLines={1}>{facts}</T>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <T weight="700">{money(x.cost)}</T>
+                {x.frequency === 'Annually' ? <T size={11} muted>{money(perYear(x) / 12)}/mth</T> : null}
+              </View>
+            </Pressable>
+            {isOpen && (
+              <View style={{ paddingBottom: 12, gap: 10 }}>
+                <Row style={{ gap: 8, alignItems: 'flex-end' }}>
+                  <Field style={{ flex: 1 }} label="Name" value={x.name} placeholder="e.g. Netflix" onChangeText={(v) => set(i, { name: v })} />
+                  <NumField label="Cost ($)" value={x.cost} onChange={(n) => set(i, { cost: n })} />
+                </Row>
+                <Row style={{ gap: 6 }}>
+                  {['Monthly', 'Annually'].map((f) => <Chip key={f} label={f} active={x.frequency === f} onPress={() => set(i, { frequency: f })} />)}
+                </Row>
+                <View>
+                  <Label>Budget category (used when you log a payment)</Label>
+                  <ChipRow>
+                    {categories.map((k) => <Chip key={k} label={k} active={x.category === k} onPress={() => set(i, { category: x.category === k ? '' : k })} />)}
+                  </ChipRow>
+                </View>
+                <Row style={{ gap: 8, alignItems: 'flex-end' }}>
+                  <DateField style={{ flex: 1 }} label="Due date (optional)" optional value={x.dueDate || ''}
+                    onChange={(v) => set(i, { dueDate: v })} accessibilityLabel={`${x.name} due date`} />
+                  {!isWeb && <Chip label="Remind" icon="notifications-outline" active={!!x.remind} onPress={() => set(i, { remind: !x.remind })} />}
+                </Row>
+                <Row style={{ gap: 8 }}>
+                  <Btn style={{ flex: 1 }} title="Log a payment" icon="add-circle-outline" kind="soft" disabled={!(x.name || "").trim()} onPress={() => onLog(x)} />
+                  <Btn title="Remove" kind="ghost" icon="trash-outline" onPress={() => remove(x, i)} />
+                </Row>
+              </View>
+            )}
           </View>
         );
       })}
-      <Btn title="Add" icon="add" kind="soft" style={{ marginTop: 8 }}
-        onPress={() => onChange([...items, { id: newId(), name: '', cost: 0, frequency: 'Monthly', dueDate: '', remind: true }])} />
+      <Btn title="Add" icon="add" kind="soft" style={{ marginTop: 8 }} onPress={add} />
     </Card>
   );
 }
@@ -167,14 +201,15 @@ function ShareList({ title, items, onChange, groupLabel }) {
   };
   return (
     <Card>
-      <H right={<T weight="800">{money(items.reduce((a, x) => a + share(x), 0))}</T>} sub="Your share after splitting. Tap a name to see items.">{title}</H>
+      <H right={<T weight="800">{money(items.reduce((a, x) => a + share(x), 0))}</T>} sub="Your share after splitting. Tap a name to see its items and add more.">{title}</H>
       {groups.map((grp) => {
         const rows = items.map((x, i) => [x, i]).filter(([x]) => x.group === grp);
         const sum = rows.reduce((a, [x]) => a + share(x), 0);
         const isOpen = open === grp;
         return (
           <View key={grp} style={{ borderTopWidth: 1, borderTopColor: c.line }}>
-            <Pressable onPress={() => setOpen(isOpen ? null : grp)} style={{ paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Pressable onPress={() => { setOpen(isOpen ? null : grp); if (!isOpen) setG(grp); }} accessibilityRole="button" accessibilityState={{ expanded: isOpen }}
+              style={{ paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Icon name={isOpen ? 'chevron-down' : 'chevron-forward'} size={16} color={c.muted} />
               <T weight="600" style={{ flex: 1 }}>{grp}</T>
               <T size={12} muted>{rows.length} item{rows.length > 1 ? 's' : ''}</T>
@@ -206,11 +241,13 @@ function ShareList({ title, items, onChange, groupLabel }) {
   );
 }
 
-export default function Plan({ data, update }) {
+// onLog(item): open the Add screen filled in with that subscription or bill.
+export default function Plan({ data, update, onLog }) {
   const c = useTheme();
   const r = data.recurring;
   const set = (key, val) => update((d) => ({ ...d, recurring: { ...d.recurring, [key]: val } }));
   const sum = planSummary(r);
+  const categories = data.budgets.map((b) => b.category);
 
   return (
     <Screen>
@@ -233,8 +270,10 @@ export default function Plan({ data, update }) {
         <T size={11} muted style={{ marginTop: 4 }}>Per year, per month</T>
       </Card>
 
-      <CostList title="Subscriptions" items={r.subscriptions} onChange={(v) => set('subscriptions', v)} remindersOn={data.settings.billReminders} />
-      <CostList title="Annual bills" items={r.bills} onChange={(v) => set('bills', v)} remindersOn={data.settings.billReminders} />
+      <CostList title="Subscriptions" items={r.subscriptions} onChange={(v) => set('subscriptions', v)} remindersOn={data.settings.billReminders}
+        categories={categories} onLog={onLog} />
+      <CostList title="Annual bills" items={r.bills} onChange={(v) => set('bills', v)} remindersOn={data.settings.billReminders}
+        categories={categories} onLog={onLog} />
       <ShareList title="Gifts and birthdays" groupLabel="Person" items={r.gifts} onChange={(v) => set('gifts', v)} />
       <ShareList title="Trips and outings" groupLabel="Trip" items={r.trips} onChange={(v) => set('trips', v)} />
 
@@ -243,8 +282,8 @@ export default function Plan({ data, update }) {
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {r.badminton.map((b, i) => (
             <View key={i} style={{ flexBasis: '30%', flexGrow: 1 }}>
-              <Field label={MONTHS[i]} value={b.cost ? String(b.cost) : ''} keyboardType="decimal-pad" placeholder="0"
-                onChangeText={(v) => { const n = parseFloat(v); set('badminton', r.badminton.map((x, j) => (j === i ? { ...x, cost: Number.isNaN(n) ? 0 : n } : x))); }} />
+              <NumField label={MONTHS[i]} value={b.cost} width="100%"
+                onChange={(n) => set('badminton', r.badminton.map((x, j) => (j === i ? { ...x, cost: n } : x)))} />
             </View>
           ))}
         </View>

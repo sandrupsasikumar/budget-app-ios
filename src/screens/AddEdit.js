@@ -4,7 +4,7 @@ import { Card, Btn, Chip, ChipRow, Field, Label, Screen, T, Row, Icon, Toggle } 
 import { useTheme } from '../theme';
 import {
   INCOME, isValidDate, newId, shiftDate, todayString, money, storeIndex, storeSuggestions,
-  recentTemplates, splitShare, txTitle,
+  recentTemplates, splitShare, txTitle, lastMethod,
 } from '../logic';
 import { pickReceipt, deleteReceipt, useReceiptUri } from '../receipts';
 import { say, confirmAction } from '../platform';
@@ -33,19 +33,28 @@ function Thumb({ refId }) {
     : <View style={{ width: 64, height: 64, borderRadius: 10, backgroundColor: c.track }} />;
 }
 
-export default function AddEdit({ data, existing, onSave, onDelete, onDone }) {
+// template: { store, amount, category } to start a new expense from (a bill being logged).
+// onUndo(id): takes back the expense that was just added.
+export default function AddEdit({ data, existing, template, onSave, onDelete, onDone, onUndo }) {
   const c = useTheme();
-  const cats = [...data.budgets.map((b) => b.category), INCOME];
+  const budgetCats = [...data.budgets.map((b) => b.category), INCOME];
+  // Keep showing a category this transaction already has, even if it is no longer in the budget.
+  const cats = existing?.category && !budgetCats.includes(existing.category) ? [...budgetCats, existing.category] : budgetCats;
   const [date, setDate] = useState(existing?.date || todayString());
-  const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
+  const [amount, setAmount] = useState(existing ? String(existing.amount) : template?.amount > 0 ? String(template.amount) : '');
   const [splitOn, setSplitOn] = useState(!!existing?.split);
   const [splitTotal, setSplitTotal] = useState(existing?.split ? String(existing.split.total) : '');
   const [splitPeople, setSplitPeople] = useState(existing?.split ? String(existing.split.people) : '2');
-  const [category, setCategory] = useState(existing?.category || '');
-  const [store, setStore] = useState(existing?.store || '');
+  const [category, setCategory] = useState(existing?.category || (budgetCats.includes(template?.category) ? template.category : ''));
+  const [store, setStore] = useState(existing?.store || template?.store || '');
   const [storeFocus, setStoreFocus] = useState(false);
   const [description, setDescription] = useState(existing?.description || '');
-  const [method, setMethod] = useState(existing?.method || data.methods[0]);
+  // New expenses start on the payment method used last time.
+  const [method, setMethod] = useState(() => {
+    if (existing?.method) return existing.method;
+    const last = lastMethod(data.transactions);
+    return data.methods.includes(last) ? last : data.methods[0];
+  });
   const [notes, setNotes] = useState(existing?.notes || '');
   const [receipt, setReceipt] = useState(existing?.receipt || null);
   const [viewing, setViewing] = useState(null);
@@ -63,7 +72,7 @@ export default function AddEdit({ data, existing, onSave, onDelete, onDone }) {
 
   const problem = Number.isNaN(amt) || amt <= 0 ? 'Enter an amount above 0'
     : !category ? 'Pick a category'
-    : !isValidDate(date) ? 'Date must look like 2026-10-13' : null;
+    : !isValidDate(date) ? 'Pick a date' : null;
 
   const pickStore = (s) => {
     setStore(s.store);
@@ -105,8 +114,21 @@ export default function AddEdit({ data, existing, onSave, onDelete, onDone }) {
     if (existing?.receipt && existing.receipt !== receipt) deleteReceipt(existing.receipt);
     const alert = onSave(tx);
     if (existing) { onDone && onDone(); return; }
-    setBanner({ text: `Saved ${money(tx.amount)} to ${tx.category}`, alert });
+    setBanner({ text: `Saved ${money(tx.amount)} to ${tx.category}`, alert, tx });
     reset();
+  };
+
+  // Takes the expense back out and puts it in the form again, to fix a mistake or drop it.
+  const undo = () => {
+    const tx = banner.tx;
+    onUndo(tx.id);
+    setDraftId(tx.id);
+    setDate(tx.date); setStore(tx.store); setDescription(tx.description); setCategory(tx.category);
+    setMethod(tx.method); setNotes(tx.notes); setReceipt(tx.receipt);
+    setAmount(String(tx.amount));
+    setSplitOn(!!tx.split);
+    if (tx.split) { setSplitTotal(String(tx.split.total)); setSplitPeople(String(tx.split.people)); }
+    setBanner({ text: 'Taken back. Change it and add it again, or leave it out.', alert: null });
   };
 
   const attach = async (source) => {
@@ -136,6 +158,7 @@ export default function AddEdit({ data, existing, onSave, onDelete, onDone }) {
               <T weight="700">{banner.text}</T>
               {banner.alert && <T size={13}>{banner.alert.title}. {banner.alert.body}</T>}
             </View>
+            {banner.tx && onUndo ? <Btn title="Undo" kind="ghost" onPress={undo} style={{ paddingVertical: 6, paddingHorizontal: 10 }} /> : null}
           </Row>
         </Card>
       )}

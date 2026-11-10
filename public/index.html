@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Budget</title>
     <meta name="description" content="Personal budget tracker" />
-    <meta name="theme-color" content="#1F7A5A" />
+    <!-- Browser bar colour follows the app's light and dark backgrounds -->
+    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#17201D" media="(prefers-color-scheme: dark)" />
 
     <!-- Installable on iPhone: Share > Add to Home Screen -->
     <link rel="manifest" href="./manifest.json" />
@@ -18,16 +20,29 @@
 
     <style id="expo-reset">
       html, body { height: 100%; }
-      body { overflow: hidden; margin: 0; background: #F3F5F4; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+      body { overflow: hidden; margin: 0; background: #F3F5F4; -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
       @media (prefers-color-scheme: dark) { body { background: #0E1412; } }
       #root { display: flex; height: 100%; flex: 1; }
       /* Stop iOS zooming into inputs and text size jumping on rotate */
       input, textarea { font-size: 16px; }
       html { -webkit-text-size-adjust: 100%; }
+      /* Date picker field: iOS centres the date and shrinks an empty field unless told otherwise */
+      .date-input { -webkit-appearance: none; appearance: none; text-align: left; }
+      .date-input::-webkit-date-and-time-value { text-align: left; }
     </style>
 
     <script>
       if ('serviceWorker' in navigator) {
+        // A new version installs in the background and takes over by itself. If that happens
+        // just after the app opened, reload once so the new version runs now instead of on the
+        // next open. Not done later, so nothing half typed is lost. Skipped on the very first
+        // install (no earlier version was running).
+        var hadController = !!navigator.serviceWorker.controller;
+        var openedAt = Date.now();
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (hadController && Date.now() - openedAt < 20000) window.location.reload();
+        });
         window.addEventListener('load', function () {
           navigator.serviceWorker.register('./sw.js').catch(function (e) {
             console.warn('Service worker registration failed', e);

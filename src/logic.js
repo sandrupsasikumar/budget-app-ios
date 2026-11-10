@@ -299,14 +299,15 @@ export function migrate(data) {
   d.transactions = list(d.transactions);
   d.budgets = list(d.budgets).map((b) => ({ rollover: false, type: 'Flexible', notes: '', ...b, monthly: Number(b.monthly) || 0 }));
   d.methods = list(d.methods).length ? d.methods : [...DEFAULT_METHODS];
-  d.categories = list(d.categories).length ? d.categories : [...d.budgets.map((b) => b.category), INCOME];
+  // Always rebuilt from the budget list, so the two cannot drift apart after a rename or a sync.
+  d.categories = [...d.budgets.map((b) => b.category), INCOME];
   d.goals = list(d.goals).map((g) => ({ name: '', targetDate: '', ...g, id: g.id || newId(), target: Number(g.target) || 0, saved: Number(g.saved) || 0 }));
   d.settings = {
     expectedIncome: 0, warnThreshold: 0.9, theme: 'system', budgetAlerts: true, billReminders: true, remindDaysBefore: 2,
     ...(d.settings || {}),
   };
   const r = d.recurring && typeof d.recurring === 'object' ? d.recurring : {};
-  const withDue = (x) => ({ name: '', cost: 0, frequency: 'Monthly', dueDate: '', remind: false, ...x });
+  const withDue = (x) => ({ name: '', cost: 0, frequency: 'Monthly', dueDate: '', remind: false, category: '', ...x });
   r.subscriptions = list(r.subscriptions).map(withDue);
   r.bills = list(r.bills).map(withDue);
   r.gifts = list(r.gifts);
@@ -507,8 +508,133 @@ export function upcomingReminders(recurring, daysBefore, today = todayString(), 
 export function upcomingBills(recurring, today = todayString(), limit = 5) {
   return [...recurring.subscriptions, ...recurring.bills]
     .filter((i) => i.name && i.dueDate)
-    .map((i) => ({ name: i.name, cost: i.cost, due: nextDue(i, today) }))
+    .map((i) => ({ id: i.id, name: i.name, cost: i.cost, category: i.category || '', due: nextDue(i, today) }))
     .filter((i) => i.due)
     .sort((a, b) => (a.due < b.due ? -1 : 1))
     .slice(0, limit);
+}
+
+// ---- Friendly dates ----
+
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const utc = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+
+export function daysBetween(from, to) {
+  return Math.round((utc(to) - utc(from)) / 86400000);
+}
+
+// 'Today', 'Yesterday', 'Tue 10 Nov', and 'Tue 10 Nov 2025' for other years.
+export function dayLabel(date, today = todayString()) {
+  if (!isValidDate(date)) return date || '';
+  const n = daysBetween(today, date);
+  if (n === 0) return 'Today';
+  if (n === -1) return 'Yesterday';
+  if (n === 1) return 'Tomorrow';
+  const [y, m, d] = date.split('-').map(Number);
+  const weekday = DAYS_SHORT[new Date(utc(date)).getUTCDay()];
+  return `${weekday} ${d} ${MONTHS_SHORT[m - 1]}${date.slice(0, 4) === today.slice(0, 4) ? '' : ` ${y}`}`;
+}
+
+// For bills: 'Today', 'Tomorrow', 'in 5 days', then the date itself further out.
+export function dueLabel(due, today = todayString()) {
+  if (!isValidDate(due)) return due || '';
+  const n = daysBetween(today, due);
+  return n > 1 && n <= 14 ? `in ${n} days` : dayLabel(due, today);
+}
+
+// ---- Activity list ----
+
+// Newest first. Typing in the search box looks through every month; without search text the
+// list is the chosen month. Category and method filters apply either way.
+export function findTransactions(transactions, { year, month, q = '', category = 'All', method = 'All' }) {
+  const needle = q.trim().toLowerCase().replace(/^\$/, '');
+  const s = monthStart(year, month), e = monthEnd(year, month);
+  const text = (t) => `${t.store || ''} ${t.description || ''} ${t.category || ''} ${t.notes || ''} ${Number(t.amount).toFixed(2)}`.toLowerCase();
+  return transactions
+    .map((t, i) => [t, i])
+    .filter(([t]) => (needle ? text(t).includes(needle) : inRange(t, s, e)))
+    .filter(([t]) => category === 'All' || t.category === category)
+    .filter(([t]) => method === 'All' || t.method === method)
+    // Same day: the one added last comes first.
+    .sort((a, b) => (a[0].date < b[0].date ? 1 : a[0].date > b[0].date ? -1 : b[1] - a[1]))
+    .map(([t]) => t);
+}
+
+// Groups an already sorted list by day, with each day's spending and income.
+export function groupByDay(list) {
+  const groups = [];
+  for (const t of list) {
+    let g = groups[groups.length - 1];
+    if (!g || g.date !== t.date) { g = { date: t.date, items: [], spent: 0, income: 0 }; groups.push(g); }
+    g.items.push(t);
+    if (t.category === INCOME) g.income = round2(g.income + t.amount); else g.spent = round2(g.spent + t.amount);
+  }
+  return groups;
+}
+
+// The payment method used most recently, so the Add screen starts on the card you actually use.
+export function lastMethod(transactions, fallback = '') {
+  let best = null;
+  for (const t of transactions) if (t.method && (!best || t.date >= best.date)) best = t;
+  return best ? best.method : fallback;
+}
+
+// ---- Categories ----
+
+export const FALLBACK_CATEGORY = 'Uncategorised';
+const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+const newBudget = (category) => ({ category, monthly: 0, type: 'Flexible', notes: '', rollover: false });
+const withCategories = (d) => ({ ...d, categories: [...d.budgets.map((b) => b.category), INCOME] });
+
+export function categoryCount(data, name) {
+  return data.transactions.reduce((a, t) => a + (t.category === name ? 1 : 0), 0);
+}
+
+// Why a name cannot be used, or null when it is fine. renaming: the category being renamed.
+export function categoryProblem(data, name, renaming = null) {
+  const n = String(name || '').trim();
+  if (!n) return 'Give the category a name.';
+  if (n.length > 30) return 'Keep the name to 30 characters or fewer.';
+  if (sameName(n, INCOME)) return 'Income is built in already.';
+  if (data.budgets.some((b) => sameName(b.category, n) && b.category !== renaming)) return `There is already a category called ${n}.`;
+  return null;
+}
+
+export function addCategory(data, name) {
+  return withCategories({ ...data, budgets: [...data.budgets, newBudget(name.trim())] });
+}
+
+// Renames it everywhere: the budget, every transaction, and subscriptions or bills that use it.
+export function renameCategory(data, from, to) {
+  const name = to.trim();
+  if (name === from) return data;
+  const swap = (x) => (x.category === from ? { ...x, category: name } : x);
+  return withCategories({
+    ...data,
+    budgets: data.budgets.map(swap),
+    transactions: data.transactions.map(swap),
+    recurring: { ...data.recurring, subscriptions: data.recurring.subscriptions.map(swap), bills: data.recurring.bills.map(swap) },
+  });
+}
+
+// Why a category cannot be removed, or null when it can.
+export function removeCategoryProblem(data, name) {
+  const n = categoryCount(data, name);
+  if (name === FALLBACK_CATEGORY && n > 0) return `${FALLBACK_CATEGORY} holds ${n} transaction${n === 1 ? '' : 's'}. Move them to another category first.`;
+  return null;
+}
+
+// Its transactions are kept and move to Uncategorised (added if it is not there).
+export function removeCategory(data, name) {
+  const used = categoryCount(data, name) > 0;
+  let budgets = data.budgets.filter((b) => b.category !== name);
+  if (used && !budgets.some((b) => b.category === FALLBACK_CATEGORY)) budgets = [...budgets, newBudget(FALLBACK_CATEGORY)];
+  const move = (x) => (x.category === name ? { ...x, category: FALLBACK_CATEGORY } : x);
+  const clear = (x) => (x.category === name ? { ...x, category: '' } : x);
+  return withCategories({
+    ...data,
+    budgets,
+    transactions: data.transactions.map(move),
+    recurring: { ...data.recurring, subscriptions: data.recurring.subscriptions.map(clear), bills: data.recurring.bills.map(clear) },
+  });
 }

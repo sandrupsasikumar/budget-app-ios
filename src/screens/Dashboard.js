@@ -6,7 +6,7 @@ import { isWeb, isIos, isInstalledWebApp } from '../platform';
 import { exportBackup } from '../dataio';
 import {
   dashboard, yearTable, heatmap, monthSummary, trend, categoryBreakdown, upcomingBills,
-  money, percent, MONTHS, todayString, txTitle,
+  money, percent, MONTHS, todayString, txTitle, dueLabel,
 } from '../logic';
 
 export function MonthNav({ period, setPeriod }) {
@@ -47,15 +47,16 @@ function Summary({ data, period, d }) {
   const change = sm.change;
   return (
     <Card style={{ backgroundColor: c.accentSoft, borderColor: c.accentSoft }}>
-      <T size={13} color={c.accent} weight="700">{d.daysLeft > 0 ? `${d.daysLeft} days left this month` : 'Month summary'}</T>
-      <Text style={{ fontSize: 30, fontWeight: '800', color: c.text, marginTop: 4 }}>
-        {money(Math.max(0, d.totals.remaining))}
+      <T size={13} color={c.accent} weight="700">
+        {d.daysLeft === 0 ? 'Month summary' : todayString() < d.start ? 'Not started yet' : d.daysLeft === 1 ? 'Last day of the month' : `${d.daysLeft} days left this month`}
+      </T>
+      <Text style={{ fontSize: 30, fontWeight: '800', color: d.totals.remaining < 0 ? c.bad : c.text, marginTop: 4 }}>
+        {money(Math.abs(d.totals.remaining))}
         <Text style={{ fontSize: 15, fontWeight: '600', color: c.muted }}> {d.totals.remaining < 0 ? 'over budget' : 'left to spend'}</Text>
       </Text>
       {d.totals.perDay > 0 && (
         <T size={14} muted>About {money(d.totals.perDay)} a day for the rest of the month</T>
       )}
-      {d.totals.remaining < 0 && <T size={14} color={c.bad} weight="700">{money(-d.totals.remaining)} over your total budget</T>}
       <View style={{ marginTop: 10, gap: 4 }}>
         {sm.top && <T size={13} muted>Most spent on <T size={13} weight="700">{sm.top.category}</T> ({percent(sm.top.share)} of spending)</T>}
         {sm.biggest && <T size={13} muted>Biggest purchase <T size={13} weight="700">{txTitle(sm.biggest)}</T>, {money(sm.biggest.amount)}</T>}
@@ -74,24 +75,27 @@ function Summary({ data, period, d }) {
   );
 }
 
-function LeftToSpend({ d }) {
+function LeftToSpend({ d, onOpenCategory }) {
   const c = useTheme();
   const [showAll, setShowAll] = useState(false);
   const rows = showAll ? d.rows : d.rows.filter((r) => r.budget > 0 || r.actual > 0);
   return (
     <Card>
-      <H sub={d.daysLeft > 0 ? 'What is left in each category, and what that means per day' : 'How each category finished'}
+      <H sub={d.daysLeft > 0 ? 'What is left in each category. Tap one to see its transactions.' : 'How each category finished. Tap one to see its transactions.'}
         right={<Pill text={d.totals.status} status={d.totals.status} />}>Left to spend</H>
       {rows.map((r) => {
         const over = r.remaining < 0;
         return (
-          <View key={r.category} style={{ paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line }}>
+          <Pressable key={r.category} onPress={() => onOpenCategory(r.category)} accessibilityRole="button"
+            accessibilityLabel={`${r.category}, ${over ? `${money(-r.remaining)} over` : `${money(r.remaining)} left`}. Show transactions`}
+            style={({ pressed }) => ({ paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line, opacity: pressed ? 0.6 : 1 })}>
             <Row style={{ justifyContent: 'space-between' }}>
               <Row style={{ flex: 1, gap: 6 }}>
                 <T weight="700">{r.category}</T>
                 {r.rollover && <Icon name="repeat" size={14} color={c.muted} accessibilityLabel="Rollover on" />}
               </Row>
               <T weight="800" color={over ? c.bad : c.text}>{over ? `${money(-r.remaining)} over` : `${money(r.remaining)} left`}</T>
+              <Icon name="chevron-forward" size={16} color={c.muted} style={{ marginLeft: 4 }} />
             </Row>
             <View style={{ marginVertical: 6 }}><Bar value={r.actual} max={r.available} status={r.status} /></View>
             <Row style={{ justifyContent: 'space-between' }}>
@@ -104,7 +108,7 @@ function LeftToSpend({ d }) {
               </T>
             </Row>
             <T size={11} muted style={{ marginTop: 2 }}>Year to date {money(r.ytdActual)} of {money(r.ytdBudget)}</T>
-          </View>
+          </Pressable>
         );
       })}
       <Pressable onPress={() => setShowAll((v) => !v)} style={{ paddingTop: 10 }}>
@@ -114,21 +118,31 @@ function LeftToSpend({ d }) {
   );
 }
 
-function Upcoming({ data }) {
+function Upcoming({ data, onLogBill }) {
   const c = useTheme();
-  const list = upcomingBills(data.recurring, todayString(), 4);
+  const today = todayString();
+  const list = upcomingBills(data.recurring, today, 4);
   if (!list.length) return null;
   return (
     <Card>
-      <H>Coming up</H>
-      {list.map((b) => (
-        <Row key={b.name + b.due} style={{ paddingVertical: 6, gap: 10 }}>
-          <Icon name="calendar-outline" size={18} color={c.muted} />
-          <T style={{ flex: 1 }}>{b.name}</T>
-          <T size={13} muted>{b.due}</T>
-          <T weight="700" style={{ width: 80, textAlign: 'right' }}>{money(b.cost)}</T>
-        </Row>
-      ))}
+      <H sub="Tap Log when one has been paid to add it as an expense">Coming up</H>
+      {list.map((b) => {
+        const label = dueLabel(b.due, today);
+        const when = /^(Today|Tomorrow|Yesterday)$/.test(label) ? label.toLowerCase() : label;
+        return (
+          <Row key={b.id || b.name + b.due} style={{ paddingVertical: 6, gap: 10 }}>
+            <Icon name="calendar-outline" size={18} color={c.muted} />
+            <View style={{ flex: 1 }}>
+              <T numberOfLines={1}>{b.name}</T>
+              <T size={12} color={b.due <= today ? c.warn : c.muted} weight={b.due <= today ? '700' : '400'}>
+                {b.due < today ? `Was due ${when}` : `Due ${when}`}
+              </T>
+            </View>
+            <T weight="700">{money(b.cost)}</T>
+            <Btn title="Log" kind="soft" onPress={() => onLogBill(b)} style={{ paddingVertical: 6, paddingHorizontal: 12 }} />
+          </Row>
+        );
+      })}
     </Card>
   );
 }
@@ -160,22 +174,24 @@ function Trends({ data, period }) {
   );
 }
 
-function Breakdown({ data, period }) {
+function Breakdown({ data, period, onOpenCategory }) {
   const c = useTheme();
   const rows = useMemo(() => categoryBreakdown(data, period.year, period.month), [data, period]);
   if (!rows.length) return null;
   const max = rows[0].amount;
   return (
     <Card>
-      <H>Where the money went</H>
+      <H sub="Tap a category to see its transactions">Where the money went</H>
       {rows.map((r) => (
-        <View key={r.category} style={{ marginBottom: 8 }}>
+        <Pressable key={r.category} onPress={() => onOpenCategory(r.category)} accessibilityRole="button"
+          accessibilityLabel={`${r.category}, ${money(r.amount)}. Show transactions`}
+          style={({ pressed }) => ({ paddingVertical: 5, opacity: pressed ? 0.6 : 1 })}>
           <Row style={{ justifyContent: 'space-between', marginBottom: 4 }}>
             <T size={14}>{r.category}</T>
             <T size={14} weight="700">{money(r.amount)} <T size={12} muted>{percent(r.share)}</T></T>
           </Row>
           <Bar value={r.amount} max={max} color={c.accent} height={6} />
-        </View>
+        </Pressable>
       ))}
     </Card>
   );
@@ -312,7 +328,9 @@ function BackupNudge({ data, update, synced }) {
   );
 }
 
-export default function Dashboard({ data, period, setPeriod, update, synced }) {
+// onOpenCategory(name): show that category on the Activity tab.
+// onLogBill(bill): open the Add screen filled in with that subscription or bill.
+export default function Dashboard({ data, period, setPeriod, update, synced, onOpenCategory, onLogBill }) {
   const c = useTheme();
   const d = useMemo(() => dashboard(data, period.year, period.month, todayString()), [data, period]);
   const [view, setView] = useState('month');
@@ -340,8 +358,8 @@ export default function Dashboard({ data, period, setPeriod, update, synced }) {
         <Chip label="Charts" icon="pie-chart-outline" active={view === 'charts'} onPress={() => setView('charts')} />
         <Chip label="Year" icon="calendar-outline" active={view === 'year'} onPress={() => setView('year')} />
       </Row>
-      {view === 'month' && (<><LeftToSpend d={d} /><Upcoming data={data} /></>)}
-      {view === 'charts' && (<><Trends data={data} period={period} /><Breakdown data={data} period={period} /></>)}
+      {view === 'month' && (<><LeftToSpend d={d} onOpenCategory={onOpenCategory} /><Upcoming data={data} onLogBill={onLogBill} /></>)}
+      {view === 'charts' && (<><Trends data={data} period={period} /><Breakdown data={data} period={period} onOpenCategory={onOpenCategory} /></>)}
       {view === 'year' && (<><YearTable data={data} period={period} /><Heatmap data={data} period={period} /></>)}
     </Screen>
   );
