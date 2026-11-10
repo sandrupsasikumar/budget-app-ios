@@ -1,0 +1,153 @@
+{
+ "version": 1,
+ "transactions": [],
+ "budgets": [
+  {
+   "category": "Entertainment",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Uncategorised",
+   "monthly": 0,
+   "type": "Fixed",
+   "notes": ""
+  },
+  {
+   "category": "Eating Out",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Groceries",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Cash",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Health",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Shopping",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Transport",
+   "monthly": 0,
+   "type": "Fixed",
+   "notes": ""
+  },
+  {
+   "category": "Education/Work",
+   "monthly": 0,
+   "type": "Fixed",
+   "notes": ""
+  },
+  {
+   "category": "Travel",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  },
+  {
+   "category": "Fuel",
+   "monthly": 0,
+   "type": "Flexible",
+   "notes": ""
+  }
+ ],
+ "categories": [
+  "Entertainment",
+  "Uncategorised",
+  "Eating Out",
+  "Groceries",
+  "Cash",
+  "Health",
+  "Shopping",
+  "Transport",
+  "Education/Work",
+  "Travel",
+  "Fuel",
+  "Income"
+ ],
+ "methods": [
+  "Credit Card",
+  "Debit Card",
+  "Cash",
+  "Bank Transfer",
+  "Other"
+ ],
+ "settings": {
+  "expectedIncome": 0,
+  "warnThreshold": 0.9
+ },
+ "recurring": {
+  "subscriptions": [],
+  "bills": [],
+  "gifts": [],
+  "trips": [],
+  "badminton": [
+   {
+    "month": 1,
+    "cost": 0
+   },
+   {
+    "month": 2,
+    "cost": 0
+   },
+   {
+    "month": 3,
+    "cost": 0
+   },
+   {
+    "month": 4,
+    "cost": 0
+   },
+   {
+    "month": 5,
+    "cost": 0
+   },
+   {
+    "month": 6,
+    "cost": 0
+   },
+   {
+    "month": 7,
+    "cost": 0
+   },
+   {
+    "month": 8,
+    "cost": 0
+   },
+   {
+    "month": 9,
+    "cost": 0
+   },
+   {
+    "month": 10,
+    "cost": 0
+   },
+   {
+    "month": 11,
+    "cost": 0
+   },
+   {
+    "month": 12,
+    "cost": 0
+   }
+  ]
+ }
+}

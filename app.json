@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "Budget",
+    "slug": "budget-tracker",
+    "version": "1.0.0",
+    "scheme": "budget",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.sandrup.budgettracker",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.sandrup.budgettracker",
+      "adaptiveIcon": {
+        "backgroundColor": "#1F7A5A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "SCHEDULE_EXACT_ALARM"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "Budget",
+      "shortName": "Budget",
+      "themeColor": "#1F7A5A",
+      "backgroundColor": "#1F7A5A"
+    },
+    "plugins": [
+      "expo-router",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Budget to use the camera to photograph receipts.",
+          "photosPermission": "Allow Budget to attach receipt photos.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1F7A5A"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1F7A5A",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#0E1412"
+          }
+        }
+      ]
+    ]
+  }
+}
